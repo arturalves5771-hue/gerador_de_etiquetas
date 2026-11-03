@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerador de Etiquetas - Prontuário SAME</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      .no-print {
+        display: none !important;
+      }
+      body {
+        background: white !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      @page {
+        size: A4 portrait;
+        margin: 8mm;
+      }
+      .print-container {
+        padding: 0 !important;
+        margin: 0 auto !important;
+        width: 100% !important;
+      }
+      .label-card {
+        break-inside: avoid;
+      }
+    }
+
+    body, button, input, select {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .grid-compact {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      border-top: 2px solid #000;
+      border-left: 2px solid #000;
+    }
+
+    .label-card-compact {
+      border-right: 2px solid #000;
+      border-bottom: 2px solid #000;
+      box-sizing: border-box;
+      height: 10.5mm;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+
+  <!-- PAINEL DE CONTROLE (Oculto na Impressão) -->
+  <div class="no-print bg-white border-b border-gray-300 p-4 shadow-sm mb-4">
+    <div class="max-w-6xl mx-auto space-y-3">
+      
+      <!-- BANNER DE AVISO DA ESCALA DE IMPRESSÃO -->
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-2.5 rounded text-amber-900 text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm">
+        <svg class="w-5 h-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <span><strong>Atenção na Impressão:</strong> Configure a escala do navegador para <mark class="bg-amber-200 px-1 py-0.5 rounded font-bold">106%</mark> nas configurações de impressão para o alinhamento correto.</span>
+      </div>
+
+      <!-- TÍTULO E SUBTÍTULO -->
+      <div>
+        <h1 class="text-xl font-bold text-gray-800">Gerador de Etiquetas (7x25 - Coladas)</h1>
+        <p class="text-xs text-gray-600">Etiquetas compactas com bordas compartilhadas para corte rápido</p>
+      </div>
+
+      <!-- FORMULÁRIO EM LINHA -->
+      <div class="flex flex-wrap items-end gap-4">
+        <div>
+          <label for="startNum" class="block text-xs font-semibold text-gray-700 uppercase mb-1">1º Número</label>
+          <input type="number" id="startNum" value="79697" 
+                 class="w-32 px-3 py-1 border border-gray-400 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none font-bold text-gray-800">
+        </div>
+
+        <div>
+          <label for="totalCount" class="block text-xs font-semibold text-gray-700 uppercase mb-1">Qtd. Etiquetas</label>
+          <input type="number" id="totalCount" value="175" min="1" max="1000" 
+                 class="w-24 px-3 py-1 border border-gray-400 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none font-bold text-gray-800">
+        </div>
+
+        <div>
+          <label for="colCount" class="block text-xs font-semibold text-gray-700 uppercase mb-1">Colunas</label>
+          <select id="colCount" class="px-3 py-1 border border-gray-400 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium">
+            <option value="7" selected>7 Colunas (25 linhas)</option>
+            <option value="6">6 Colunas</option>
+            <option value="8">8 Colunas</option>
+          </select>
+        </div>
+
+        <div class="flex items-center pb-1.5">
+          <input type="checkbox" id="formatDot" checked class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+          <label for="formatDot" class="ml-1.5 text-sm text-gray-700 font-medium">Ponto (<span id="dotExample">79.697</span>)</label>
+        </div>
+
+        <div>
+          <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-6 rounded shadow flex items-center gap-2 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+            </svg>
+            Imprimir
+          </button>
+        </div>
+      </div>
+
+      <!-- STATUS DA SEQUÊNCIA NUMÉRICA -->
+      <div class="pt-2 border-t border-gray-200">
+        <span class="text-xs font-medium text-gray-700" id="rangeInfo">
+           Sequência: <span class="font-bold text-blue-700" id="rangeText">Imprimirá do № 79.697 até o № 79.871 (175 etiquetas)</span>
+        </span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ÁREA DE IMPRESSÃO -->
+  <div class="print-container max-w-5xl mx-auto p-2">
+    <div id="labelsGrid" class="grid-compact">
+      <!-- Gerado via JS -->
+    </div>
+  </div>
+
+  <script>
+    const startNumInput = document.getElementById('startNum');
+    const totalCountInput = document.getElementById('totalCount');
+    const colCountSelect = document.getElementById('colCount');
+    const formatDotCheckbox = document.getElementById('formatDot');
+    const labelsGrid = document.getElementById('labelsGrid');
+    const rangeText = document.getElementById('rangeText');
+    const dotExample = document.getElementById('dotExample');
+
+    function loadSavedState() {
+      const savedStartNum = localStorage.getItem('etiquetas_startNum');
+      const savedTotalCount = localStorage.getItem('etiquetas_totalCount');
+      const savedColCount = localStorage.getItem('etiquetas_colCount');
+      const savedFormatDot = localStorage.getItem('etiquetas_formatDot');
+
+      if (savedStartNum !== null) startNumInput.value = savedStartNum;
+      if (savedTotalCount !== null) totalCountInput.value = savedTotalCount;
+      if (savedColCount !== null) colCountSelect.value = savedColCount;
+      if (savedFormatDot !== null) formatDotCheckbox.checked = savedFormatDot === 'true';
+    }
+
+    function saveState() {
+      localStorage.setItem('etiquetas_startNum', startNumInput.value);
+      localStorage.setItem('etiquetas_totalCount', totalCountInput.value);
+      localStorage.setItem('etiquetas_colCount', colCountSelect.value);
+      localStorage.setItem('etiquetas_formatDot', formatDotCheckbox.checked);
+    }
+
+    function formatNumber(num, useDot) {
+      if (!useDot) return num.toString();
+      return num.toLocaleString('pt-BR');
+    }
+
+    function renderLabels() {
+      const startNum = parseInt(startNumInput.value) || 0;
+      const count = parseInt(totalCountInput.value) || 0;
+      const cols = parseInt(colCountSelect.value) || 7;
+      const useDot = formatDotCheckbox.checked;
+
+      saveState();
+
+      dotExample.textContent = formatNumber(startNum || 79697, true);
+
+      if (count > 0) {
+        const endNum = startNum + count - 1;
+        rangeText.textContent = `Imprimirá do № ${formatNumber(startNum, useDot)} até o № ${formatNumber(endNum, useDot)} (${count} etiquetas)`;
+      } else {
+        rangeText.textContent = 'Nenhuma etiqueta a gerar';
+      }
+
+      labelsGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        const currentNum = startNum + i;
+        const formattedNum = formatNumber(currentNum, useDot);
+
+        html += `
+          <div class="label-card-compact bg-white flex flex-col justify-center items-center text-center p-0.5 leading-tight">
+            <span class="text-[10px] font-bold uppercase tracking-tighter text-black block">
+              Prontuário SAME
+            </span>
+            <span class="text-[15px] font-bold text-black tracking-tight">
+              № ${formattedNum}
+            </span>
+          </div>
+        `;
+      }
+
+      labelsGrid.innerHTML = html;
+    }
+
+    startNumInput.addEventListener('input', renderLabels);
+    totalCountInput.addEventListener('input', renderLabels);
+    colCountSelect.addEventListener('change', renderLabels);
+    formatDotCheckbox.addEventListener('change', renderLabels);
+
+    loadSavedState();
+    renderLabels();
+  </script>
+</body>
+</html>
