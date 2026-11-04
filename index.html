@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gerador de Etiquetas - Prontuário SAME</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     @media print {
       .no-print {
@@ -97,7 +98,7 @@
         </div>
 
         <div>
-          <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-6 rounded shadow flex items-center gap-2 transition-colors">
+          <button id="printBtn" disabled class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-6 rounded shadow flex items-center gap-2 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
             </svg>
@@ -112,6 +113,8 @@
            Sequência: <span class="font-bold text-blue-700" id="rangeText">Imprimirá do № 79.697 até o № 79.871 (175 etiquetas)</span>
         </span>
       </div>
+      <div id="historyPanel" class="mt-2 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Conectando ao histórico compartilhado...</div>
+      <p id="connectionStatus" class="text-xs text-gray-500 mt-1" role="status">Aguardando conexão com o Supabase...</p>
 
     </div>
   </div>
@@ -124,6 +127,10 @@
   </div>
 
   <script>
+    const SUPABASE_URL = 'https://kuxzxzgeogashwaczhwi.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1eHp4emdlb2dhc2h3YWN6aHdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3NDI2NzYsImV4cCI6MjEwOTMxODY3Nn0.wLBWMfiDaI0csoQkZrqc8JpSZq2MJz2_qtS0l0uM5N0';
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
     const startNumInput = document.getElementById('startNum');
     const totalCountInput = document.getElementById('totalCount');
     const colCountSelect = document.getElementById('colCount');
@@ -131,77 +138,126 @@
     const labelsGrid = document.getElementById('labelsGrid');
     const rangeText = document.getElementById('rangeText');
     const dotExample = document.getElementById('dotExample');
+    const printBtn = document.getElementById('printBtn');
+    const historyPanel = document.getElementById('historyPanel');
+    const connectionStatus = document.getElementById('connectionStatus');
+    let remoteReady = false;
+    let savingPrint = false;
 
-    function loadSavedState() {
-      const savedStartNum = localStorage.getItem('etiquetas_startNum');
-      const savedTotalCount = localStorage.getItem('etiquetas_totalCount');
-      const savedColCount = localStorage.getItem('etiquetas_colCount');
-      const savedFormatDot = localStorage.getItem('etiquetas_formatDot');
-
-      if (savedStartNum !== null) startNumInput.value = savedStartNum;
-      if (savedTotalCount !== null) totalCountInput.value = savedTotalCount;
-      if (savedColCount !== null) colCountSelect.value = savedColCount;
-      if (savedFormatDot !== null) formatDotCheckbox.checked = savedFormatDot === 'true';
+    function loadSavedPreferences() {
+      const n = localStorage.getItem('etiquetas_totalCount');
+      const c = localStorage.getItem('etiquetas_colCount');
+      const d = localStorage.getItem('etiquetas_formatDot');
+      if (n !== null) totalCountInput.value = n;
+      if (c !== null) colCountSelect.value = c;
+      if (d !== null) formatDotCheckbox.checked = d === 'true';
     }
-
-    function saveState() {
-      localStorage.setItem('etiquetas_startNum', startNumInput.value);
+    function savePreferences() {
       localStorage.setItem('etiquetas_totalCount', totalCountInput.value);
       localStorage.setItem('etiquetas_colCount', colCountSelect.value);
       localStorage.setItem('etiquetas_formatDot', formatDotCheckbox.checked);
     }
-
-    function formatNumber(num, useDot) {
-      if (!useDot) return num.toString();
-      return num.toLocaleString('pt-BR');
+    function formatNumber(num, useDot = true) {
+      return useDot ? Number(num).toLocaleString('pt-BR') : String(num);
     }
-
+    function showHistory(record) {
+      if (!record || !record.ultima_impressao || !record.ultimo_numero) {
+        historyPanel.innerHTML = '<strong>Primeira utilização:</strong> ainda não há impressão registrada. Confira o número inicial antes de imprimir.';
+        return;
+      }
+      const inicio = record.ultimo_inicio ?? (Number(record.ultimo_numero) - Number(record.ultima_quantidade || 1) + 1);
+      const qtd = record.ultima_quantidade ?? (Number(record.ultimo_numero) - Number(inicio) + 1);
+      const data = new Date(record.ultima_impressao);
+      historyPanel.innerHTML =
+        '<div class="font-bold mb-1">Última sequência registrada</div>' +
+        '<div>Faixa: <strong>' + formatNumber(inicio) + ' até ' + formatNumber(record.ultimo_numero) + '</strong></div>' +
+        '<div>Quantidade: <strong>' + formatNumber(qtd, false) + ' etiquetas</strong></div>' +
+        '<div>Data: <strong>' + data.toLocaleString('pt-BR') + '</strong></div>' +
+        '<div class="mt-1">Próximo número: <strong class="text-lg">' + formatNumber(Number(record.ultimo_numero) + 1) + '</strong></div>';
+    }
+    async function loadRemoteSequence() {
+      connectionStatus.textContent = 'Consultando sequência compartilhada...';
+      const { data, error } = await supabaseClient.from('configuracao_etiquetas')
+        .select('id, ultimo_inicio, ultimo_numero, ultima_quantidade, ultima_impressao')
+        .eq('id', 1).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('Registro com id = 1 não encontrado na tabela configuracao_etiquetas.');
+      showHistory(data);
+      if (Number(data.ultimo_numero) > 0) startNumInput.value = Number(data.ultimo_numero) + 1;
+      remoteReady = true;
+      printBtn.disabled = false;
+      printBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      connectionStatus.textContent = 'Conectado: sequência compartilhada pelo Supabase.';
+      renderLabels();
+    }
     function renderLabels() {
-      const startNum = parseInt(startNumInput.value) || 0;
-      const count = parseInt(totalCountInput.value) || 0;
-      const cols = parseInt(colCountSelect.value) || 7;
+      const start = parseInt(startNumInput.value, 10) || 0;
+      const count = parseInt(totalCountInput.value, 10) || 0;
+      const cols = parseInt(colCountSelect.value, 10) || 7;
       const useDot = formatDotCheckbox.checked;
-
-      saveState();
-
-      dotExample.textContent = formatNumber(startNum || 79697, true);
-
-      if (count > 0) {
-        const endNum = startNum + count - 1;
-        rangeText.textContent = `Imprimirá do № ${formatNumber(startNum, useDot)} até o № ${formatNumber(endNum, useDot)} (${count} etiquetas)`;
-      } else {
-        rangeText.textContent = 'Nenhuma etiqueta a gerar';
+      savePreferences();
+      dotExample.textContent = formatNumber(start || 79697, true);
+      if (count > 0 && start > 0) {
+        rangeText.textContent = 'Imprimirá do № ' + formatNumber(start, useDot) + ' até o № ' + formatNumber(start + count - 1, useDot) + ' (' + count + ' etiquetas)';
+      } else rangeText.textContent = 'Informe o primeiro número e a quantidade de etiquetas';
+      labelsGrid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+      let out = '';
+      for (let i = 0; i < Math.min(count, 1000); i++) {
+        out += '<div class="label-card-compact bg-white flex flex-col justify-center items-center text-center p-0.5 leading-tight">' +
+          '<span class="text-[10px] font-bold uppercase tracking-tighter text-black block">Prontuário SAME</span>' +
+          '<span class="text-[15px] font-bold text-black tracking-tight">№ ' + formatNumber(start + i, useDot) + '</span></div>';
       }
-
-      labelsGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-
-      let html = '';
-      for (let i = 0; i < count; i++) {
-        const currentNum = startNum + i;
-        const formattedNum = formatNumber(currentNum, useDot);
-
-        html += `
-          <div class="label-card-compact bg-white flex flex-col justify-center items-center text-center p-0.5 leading-tight">
-            <span class="text-[10px] font-bold uppercase tracking-tighter text-black block">
-              Prontuário SAME
-            </span>
-            <span class="text-[15px] font-bold text-black tracking-tight">
-              № ${formattedNum}
-            </span>
-          </div>
-        `;
-      }
-
-      labelsGrid.innerHTML = html;
+      labelsGrid.innerHTML = out;
     }
-
+    async function registerAndPrint() {
+      if (!remoteReady || savingPrint) return;
+      const inicio = Number.parseInt(startNumInput.value, 10);
+      const quantidade = Number.parseInt(totalCountInput.value, 10);
+      if (!Number.isSafeInteger(inicio) || inicio <= 0) { alert('Informe um primeiro número válido.'); startNumInput.focus(); return; }
+      if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 1000) { alert('A quantidade deve ser entre 1 e 1.000 etiquetas.'); totalCountInput.focus(); return; }
+      savingPrint = true;
+      printBtn.disabled = true;
+      connectionStatus.textContent = 'Registrando a sequência no histórico...';
+      try {
+        const { data, error } = await supabaseClient.rpc('registrar_impressao_etiquetas', { p_inicio: inicio, p_quantidade: quantidade });
+        if (error) throw error;
+        const record = Array.isArray(data) ? data[0] : data;
+        if (record) {
+          showHistory(record);
+          startNumInput.value = Number(record.ultimo_numero) + 1;
+          renderLabels();
+        }
+        connectionStatus.textContent = 'Sequência registrada. Abrindo a janela de impressão...';
+        window.print();
+      } catch (error) {
+        console.error(error);
+        const msg = error && error.message ? error.message : 'Erro desconhecido';
+        if (msg.includes('SEQUENCIA_DIVERGENTE')) {
+          try { await loadRemoteSequence(); alert('Outro computador atualizou a sequência. O próximo número foi atualizado; confira e tente novamente.'); }
+          catch (_) { alert('A sequência mudou em outro computador. Atualize a página e tente novamente.'); }
+        } else {
+          alert('Não foi possível registrar a sequência no Supabase. A impressão não foi iniciada.\n\nDetalhe: ' + msg);
+          connectionStatus.textContent = 'Falha ao registrar. Verifique a conexão e as permissões do Supabase.';
+        }
+      } finally {
+        savingPrint = false;
+        printBtn.disabled = !remoteReady;
+      }
+    }
     startNumInput.addEventListener('input', renderLabels);
     totalCountInput.addEventListener('input', renderLabels);
     colCountSelect.addEventListener('change', renderLabels);
     formatDotCheckbox.addEventListener('change', renderLabels);
-
-    loadSavedState();
+    printBtn.addEventListener('click', registerAndPrint);
+    loadSavedPreferences();
     renderLabels();
+    printBtn.disabled = true;
+    printBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    loadRemoteSequence().catch(error => {
+      console.error(error);
+      historyPanel.textContent = 'Não foi possível carregar o histórico compartilhado. A impressão ficará bloqueada para evitar repetir números.';
+      connectionStatus.textContent = 'Falha de conexão/permissão com o Supabase.';
+    });
   </script>
 </body>
 </html>
