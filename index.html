@@ -14,7 +14,6 @@
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     @media print {
       .no-print {
@@ -123,8 +122,8 @@
            Sequência: <span class="font-bold text-blue-700" id="rangeText">Imprimirá do № 79.697 até o № 79.871 (175 etiquetas)</span>
         </span>
       </div>
-      <div id="historyPanel" class="mt-2 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Conectando ao histórico compartilhado...</div>
-      <p id="connectionStatus" class="text-xs text-gray-500 mt-1" role="status">Aguardando conexão com o Supabase...</p>
+      <div id="historyPanel" class="mt-2 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Carregando histórico salvo neste navegador...</div>
+      <p id="connectionStatus" class="text-xs text-gray-500 mt-1" role="status">Histórico armazenado somente neste navegador.</p>
 
     </div>
   </div>
@@ -137,10 +136,6 @@
   </div>
 
   <script>
-    const SUPABASE_URL = 'https://kuxzxzgeogashwaczhwi.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1eHp4emdlb2dhc2h3YWN6aHdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3NDI2NzYsImV4cCI6MjEwOTMxODY3Nn0.wLBWMfiDaI0csoQkZrqc8JpSZq2MJz2_qtS0l0uM5N0';
-    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
     const startNumInput = document.getElementById('startNum');
     const totalCountInput = document.getElementById('totalCount');
     const colCountSelect = document.getElementById('colCount');
@@ -151,7 +146,7 @@
     const printBtn = document.getElementById('printBtn');
     const historyPanel = document.getElementById('historyPanel');
     const connectionStatus = document.getElementById('connectionStatus');
-    let remoteReady = false;
+    const HISTORY_KEY = 'etiquetas_ultima_impressao';
     let savingPrint = false;
 
     function loadSavedPreferences() {
@@ -185,19 +180,24 @@
         '<div>Data: <strong>' + data.toLocaleString('pt-BR') + '</strong></div>' +
         '<div class="mt-1">Próximo número: <strong class="text-lg">' + formatNumber(Number(record.ultimo_numero) + 1) + '</strong></div>';
     }
-    async function loadRemoteSequence() {
-      connectionStatus.textContent = 'Consultando sequência compartilhada...';
-      const { data, error } = await supabaseClient.from('configuracao_etiquetas')
-        .select('id, ultimo_inicio, ultimo_numero, ultima_quantidade, ultima_impressao')
-        .eq('id', 1).maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error('Registro com id = 1 não encontrado na tabela configuracao_etiquetas.');
-      showHistory(data);
-      if (Number(data.ultimo_numero) > 0) startNumInput.value = Number(data.ultimo_numero) + 1;
-      remoteReady = true;
+    function loadLocalSequence() {
+      let record = null;
+      try {
+        const saved = localStorage.getItem(HISTORY_KEY);
+        if (saved) record = JSON.parse(saved);
+      } catch (error) {
+        console.warn('Não foi possível ler o histórico local:', error);
+      }
+      if (record && Number(record.ultimo_numero) > 0) {
+        showHistory(record);
+        startNumInput.value = Number(record.ultimo_numero) + 1;
+        connectionStatus.textContent = 'Histórico carregado deste navegador.';
+      } else {
+        showHistory(null);
+        connectionStatus.textContent = 'Nenhuma impressão anterior salva neste navegador.';
+      }
       printBtn.disabled = false;
       printBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-      connectionStatus.textContent = 'Conectado: sequência compartilhada pelo Supabase.';
       renderLabels();
     }
     function renderLabels() {
@@ -219,39 +219,34 @@
       }
       labelsGrid.innerHTML = out;
     }
-    async function registerAndPrint() {
-      if (!remoteReady || savingPrint) return;
+    function registerAndPrint() {
+      if (savingPrint) return;
       const inicio = Number.parseInt(startNumInput.value, 10);
       const quantidade = Number.parseInt(totalCountInput.value, 10);
       if (!Number.isSafeInteger(inicio) || inicio <= 0) { alert('Informe um primeiro número válido.'); startNumInput.focus(); return; }
       if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 1000) { alert('A quantidade deve ser entre 1 e 1.000 etiquetas.'); totalCountInput.focus(); return; }
       savingPrint = true;
       printBtn.disabled = true;
-      connectionStatus.textContent = 'Registrando a sequência no histórico...';
       try {
-        const { data, error } = await supabaseClient.rpc('registrar_impressao_etiquetas', { p_inicio: inicio, p_quantidade: quantidade });
-        if (error) throw error;
-        const record = Array.isArray(data) ? data[0] : data;
-        if (record) {
-          showHistory(record);
-          startNumInput.value = Number(record.ultimo_numero) + 1;
-          renderLabels();
-        }
-        connectionStatus.textContent = 'Sequência registrada. Abrindo a janela de impressão...';
+        const record = {
+          ultimo_inicio: inicio,
+          ultimo_numero: inicio + quantidade - 1,
+          ultima_quantidade: quantidade,
+          ultima_impressao: new Date().toISOString()
+        };
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(record));
+        showHistory(record);
+        startNumInput.value = record.ultimo_numero + 1;
+        renderLabels();
+        connectionStatus.textContent = 'Sequência salva neste navegador. Abrindo a janela de impressão...';
         window.print();
       } catch (error) {
         console.error(error);
-        const msg = error && error.message ? error.message : 'Erro desconhecido';
-        if (msg.includes('SEQUENCIA_DIVERGENTE')) {
-          try { await loadRemoteSequence(); alert('Outro computador atualizou a sequência. O próximo número foi atualizado; confira e tente novamente.'); }
-          catch (_) { alert('A sequência mudou em outro computador. Atualize a página e tente novamente.'); }
-        } else {
-          alert('Não foi possível registrar a sequência no Supabase. A impressão não foi iniciada.\n\nDetalhe: ' + msg);
-          connectionStatus.textContent = 'Falha ao registrar. Verifique a conexão e as permissões do Supabase.';
-        }
+        alert('Não foi possível salvar o histórico neste navegador. Verifique se o armazenamento local está habilitado.\n\nA impressão não foi iniciada.');
+        connectionStatus.textContent = 'Falha ao salvar o histórico local.';
       } finally {
         savingPrint = false;
-        printBtn.disabled = !remoteReady;
+        printBtn.disabled = false;
       }
     }
     startNumInput.addEventListener('input', renderLabels);
@@ -261,13 +256,7 @@
     printBtn.addEventListener('click', registerAndPrint);
     loadSavedPreferences();
     renderLabels();
-    printBtn.disabled = true;
-    printBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    loadRemoteSequence().catch(error => {
-      console.error(error);
-      historyPanel.textContent = 'Não foi possível carregar o histórico compartilhado. A impressão ficará bloqueada para evitar repetir números.';
-      connectionStatus.textContent = 'Falha de conexão/permissão com o Supabase.';
-    });
+    loadLocalSequence();
   </script>
 </body>
 </html>
